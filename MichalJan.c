@@ -1,4 +1,3 @@
-//Sama logika programu dziala, trzeba teraz tylko dodac sygnaly do komunikacji miedzy procesami
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/mman.h>
@@ -12,20 +11,118 @@
 #include <sys/wait.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <signal.h>
+#include <bits/sigaction.h>
+#include <asm-generic/signal-defs.h>
+#include <sys/msg.h>
+
+
+#define M_ODCZYT 1
+#define STOP 19
+#define GO 18
 
 int id,fd;
 #define fName "P1_P2_fifo"
 sem_t *semP2_P3;
 sem_t *semP3_P2;
 int* buffer2;
+int msgid;
+
+struct message {
+    long mtype;
+    int val;
+};
+
+
+// Przeslanie sygnalu z P3 do PM
+void handle_sigstpP3(int sig)
+{
+    printf("dostalem : %d", sig);
+    if(sig == SIGTSTP){
+        kill(getpid() - 3, SIGUSR1);
+    }
+    if(sig == SIGQUIT){
+        kill(getpid() - 3, SIGUSR2);
+    }
+}
+
+
+// Tworzenie kolejki komunikatow
+void handle_sigPM(int sig)
+{   
+    struct message odczytP1;
+    odczytP1.mtype = M_ODCZYT;
+    if(sig == SIGUSR1){
+        kill(getpid() + 1, STOP);
+        odczytP1.val = STOP;
+    }else
+        kill(getpid() + 1, GO);  
+        odczytP1.val = GO;
+
+    msgid = msgget((key_t)1234, 0666 | IPC_CREAT); //Juz stworzona    
+    if(msgid == -1) perror("Blad przy tworzeniu kolejki");
+
+
+    if(msgsnd(msgid, (void *)&odczytP1, sizeof(struct message), 0) == -1) perror("msg not sent");
+    kill(getpid() + 1, SIGUSR1);
+    printf("wyslalem do P1 : %d sygnal: %d\n" ,getpid() + 1, sig);
+
+}
+
+
+void Nothing(int sig){
+
+}
+
+void handle_sigP1(int sig)
+{   
+    printf("Dostalem sygnal\n");
+    long int msg_to_rec = 0;
+    struct message odczytZPM;
+    msgrcv(msgid, (void*)&odczytZPM, sizeof(struct message) - sizeof(long), msg_to_rec, 0);
+
+    printf("Otrzymano od PM %d\n",odczytZPM.val);
+    
+    if(msgsnd(msgid, (void *)&odczytZPM, sizeof(struct message) - sizeof(long), 0) == -1) perror("msg not sent");
+
+    kill(getpid(), odczytZPM.val);
+    //kill(getpid() + 1, SIGUSR1);
+}
+
+
+void handle_sigP2(int sig)
+{   
+    printf("test\n");
+    long int msg_to_rec2 = 0;
+    struct message odczytZP1;
+    msgrcv(msgid, (void*)&odczytZP1, sizeof(struct message) - sizeof(long), msg_to_rec2, 0);
+    
+    kill(getpid(), odczytZP1.val);
+    if(msgsnd(msgid, (void *)&odczytZP1, sizeof(struct message) - sizeof(long), 0) == -1) perror("msg not sent");
+    kill(getpid() + 1, SIGUSR1);
+}
+
+
+void handle_sigP3(int sig){
+
+    long int msg_to_rec3 = 0;
+    struct message odczytP3;
+    msgrcv(msgid, (void*)&odczytP3, sizeof(struct message) - sizeof(long), msg_to_rec3, 0);
+    kill(getpid(), odczytP3.val);
+}
+
 
 int main(){
-    char buffer[100]; // Zakladamy nie wiekszy rozmiar wiersza niz 100
+    
+    //Czyszczenie poprzedniej kolejki
+    msgctl(msgid, IPC_RMID, NULL);
+
+    char buffer[200]; // Zakladamy nie wiekszy rozmiar linijki niz 200 znakow
     mkfifo(fName, 0666);
 
     //Otwieranie pliku
     FILE *plik;
-    plik = fopen("dane.txt", "r");
+    plik = fopen("wiedzmin.txt", "r");
     if (plik == NULL) {
         perror("Błąd przy otwieraniu pliku");
         return 1;
@@ -39,19 +136,23 @@ int main(){
     semP3_P2 = semP2_P3 + 1;
     buffer2 = (int*)(semP3_P2 + 1);
 
+
     //Inicjalizacja semafora
     sem_init(semP2_P3, 1, 1);
     sem_init(semP3_P2, 1, 0);
 
-
-
-    if(fork()){
+    int check = 0;
+    //Tworzenie procesow P1 - P3
+    if(check = fork()){
+        if(check == -1 ) return 1;
         id = 0;
     }else{
-        if(fork()){
+        if(check = fork()){
+            if(check == -1 ) return 1;
             id = 1;
         }else{
-            if(fork()){
+            if(check = fork()){
+                if(check == -1 ) return 1;
                 id = 2;
             }
             else
@@ -60,19 +161,24 @@ int main(){
     }
 
     //Kod dla 1 procesu
-    if(id == 1){
+    if(id == 1)
+    {
 
         printf("(1) Jestem procesem:  %d\n", getpid());
+        signal(SIGTSTP, &Nothing);
+        signal(SIGUSR1, &handle_sigP1);
+        signal(SIGQUIT, &Nothing);
         fd = open(fName, O_WRONLY);
         if(fd == -1){
             printf("cos poszlo nie tak!");
             return 1;
-        }
+        } 
 
-        while(fgets(buffer, sizeof(buffer), plik)) {
-        
+        while(fgets(buffer, sizeof(buffer), plik))
+        {
             write(fd, &buffer, sizeof(buffer));
         }
+        
         //Wyslanie komunikatu o zakonczeniu czytania z pliku
         strcpy(buffer,"Koniec");
         write(fd, &buffer, sizeof(buffer));
@@ -81,8 +187,13 @@ int main(){
     }
 
     // Kod dla 2 procesu
-    if(id == 2){
+    if(id == 2)
+    {
+
         printf("(2) Jestem procesem:  %d\n", getpid());
+        signal(SIGTSTP, &Nothing);
+        signal(SIGQUIT, &Nothing);
+        signal(SIGUSR1, &handle_sigP2);
         int size = 0;
         fd = open(fName,O_RDONLY);
 
@@ -90,8 +201,8 @@ int main(){
             printf("cos poszlo nie tak!");
             return 1;
         }
-        while(1)
-        { 
+        while(1){
+
             read(fd, &buffer, sizeof(buffer));
             if(strcmp(buffer,"Koniec") == 0) break;
             size = strlen(buffer);
@@ -105,22 +216,49 @@ int main(){
 
     //Kod dla 3 procesu
     if(id == 3){
+        int suma = 0;
+
+        //Sygnaly
+        /*struct sigaction sa;
+        sa.sa_handler = &handle_sigstp;
+        sa.sa_flags = SA_RESTART;
+        sigaction(SIGTSTP, &sa, NULL);*/
+
+        signal(SIGTSTP, &handle_sigstpP3);
+        signal(SIGQUIT, &handle_sigstpP3);
+        signal(SIGUSR1, &handle_sigP3);
+
         printf("(3) Jestem procesem:  %d\n", getpid());
-        while(1){
+        while(1)
+        {
+
             sem_wait(semP3_P2);
             printf("Odebralem od P2: %d\n", *buffer2);
+            suma += *buffer2;
+            printf("Odczytanych znakow lacznie: %d\n", suma);
             sem_post(semP2_P3);
+
         }
     }
 
     // Kod procesu macierzystego
-    if(id == 0){
+    if(id == 0)
+    {
+
         printf("(Macierzysty) Jestem procesem:  %d\n", getpid());
+        signal(SIGTSTP, &Nothing);
+        signal(SIGQUIT, &Nothing);
+        signal(SIGUSR1, &handle_sigPM);
+        signal(SIGUSR2, &handle_sigPM);
+        while(1)
+        {
+
+        }
 
     }
 
     
-    wait(NULL);
+    //wait(NULL);
 
 
     return 0;
