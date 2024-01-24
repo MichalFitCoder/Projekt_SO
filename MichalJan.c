@@ -26,7 +26,9 @@ int id,fd;
 sem_t *semP2_P3;
 sem_t *semP3_P2;
 int* buffer2;
-int msgid;
+int *msgid;
+int running = 1;
+
 
 struct message {
     long mtype;
@@ -37,7 +39,6 @@ struct message {
 // Przeslanie sygnalu z P3 do PM
 void handle_sigstpP3(int sig)
 {
-    printf("dostalem : %d", sig);
     if(sig == SIGTSTP){
         kill(getpid() - 3, SIGUSR1);
     }
@@ -54,18 +55,19 @@ void handle_sigPM(int sig)
     odczytP1.mtype = M_ODCZYT;
     if(sig == SIGUSR1){
         kill(getpid() + 1, STOP);
-        odczytP1.val = STOP;
-    }else
+        odczytP1.val = 0;
+    }
+    if(sig == SIGUSR2){
         kill(getpid() + 1, GO);  
-        odczytP1.val = GO;
+        odczytP1.val = 1;
 
-    msgid = msgget((key_t)1234, 0666 | IPC_CREAT); //Juz stworzona    
-    if(msgid == -1) perror("Blad przy tworzeniu kolejki");
+    }
+
+    if(*msgid == -1) perror("Blad przy tworzeniu kolejki");
 
 
-    if(msgsnd(msgid, (void *)&odczytP1, sizeof(struct message), 0) == -1) perror("msg not sent");
-    kill(getpid() + 1, SIGUSR1);
-    printf("wyslalem do P1 : %d sygnal: %d\n" ,getpid() + 1, sig);
+    if((msgsnd(*msgid, (void *)&odczytP1, sizeof(struct message), 0)) == -1) perror("msg not sent");
+    //kill(getpid() + 1, SIGUSR1);
 
 }
 
@@ -76,46 +78,61 @@ void Nothing(int sig){
 
 void handle_sigP1(int sig)
 {   
-    printf("Dostalem sygnal\n");
+    //msgid = msgget((key_t)555, 0666 | IPC_CREAT);
     long int msg_to_rec = 0;
     struct message odczytZPM;
-    msgrcv(msgid, (void*)&odczytZPM, sizeof(struct message) - sizeof(long), msg_to_rec, 0);
+    msgrcv(*msgid, (void*)&odczytZPM, sizeof(struct message), msg_to_rec, 0);
 
-    printf("Otrzymano od PM %d\n",odczytZPM.val);
     
-    if(msgsnd(msgid, (void *)&odczytZPM, sizeof(struct message) - sizeof(long), 0) == -1) perror("msg not sent");
+    if(odczytZPM.val == 0)
+        kill(getpid() - 1, STOP);
 
-    kill(getpid(), odczytZPM.val);
+    if(odczytZPM.val == 1)
+        kill(getpid() - 1, GO);
+    
+    if((msgsnd(*msgid, (void *)&odczytZPM, sizeof(struct message), 0)) == -1) perror("msg not sent");
+
     //kill(getpid() + 1, SIGUSR1);
 }
 
 
 void handle_sigP2(int sig)
 {   
-    printf("test\n");
+    //int msgid = msgget((key_t)555, 0666 | IPC_CREAT);
     long int msg_to_rec2 = 0;
     struct message odczytZP1;
-    msgrcv(msgid, (void*)&odczytZP1, sizeof(struct message) - sizeof(long), msg_to_rec2, 0);
-    
-    kill(getpid(), odczytZP1.val);
-    if(msgsnd(msgid, (void *)&odczytZP1, sizeof(struct message) - sizeof(long), 0) == -1) perror("msg not sent");
+    msgrcv(*msgid, (void*)&odczytZP1, sizeof(struct message), msg_to_rec2, 0);
+
+    if(odczytZP1.val == 0)
+        kill(getpid() + 1, STOP);
+
+    if(odczytZP1.val == 1)
+        kill(getpid() + 1, GO);
+
+    if((msgsnd(*msgid, (void *)&odczytZP1, sizeof(struct message) - sizeof(long), 0)) == -1) perror("msg not sent");
     kill(getpid() + 1, SIGUSR1);
 }
 
 
 void handle_sigP3(int sig){
-
     long int msg_to_rec3 = 0;
     struct message odczytP3;
-    msgrcv(msgid, (void*)&odczytP3, sizeof(struct message) - sizeof(long), msg_to_rec3, 0);
-    kill(getpid(), odczytP3.val);
+    msgrcv(*msgid, (void*)&odczytP3, sizeof(struct message) - sizeof(long), msg_to_rec3, 0);
+
+    if(odczytP3.val == 0)
+        kill(getpid() + 1, STOP);
+
+    if(odczytP3.val == 1)
+        kill(getpid() + 1, GO);
+
+
 }
 
 
 int main(){
     
     //Czyszczenie poprzedniej kolejki
-    msgctl(msgid, IPC_RMID, NULL);
+    //msgctl(*msgid, IPC_RMID, NULL);
 
     char buffer[200]; // Zakladamy nie wiekszy rozmiar linijki niz 200 znakow
     mkfifo(fName, 0666);
@@ -135,6 +152,9 @@ int main(){
     semP2_P3 = (sem_t *)shmat(shm_id,NULL,0);
     semP3_P2 = semP2_P3 + 1;
     buffer2 = (int*)(semP3_P2 + 1);
+    msgid = (int*)(buffer2 + 1);
+
+    *msgid = msgget((key_t)555, 0666 | IPC_CREAT); 
 
 
     //Inicjalizacja semafora
@@ -177,6 +197,8 @@ int main(){
         while(fgets(buffer, sizeof(buffer), plik))
         {
             write(fd, &buffer, sizeof(buffer));
+            //sleep(5);
+            //while(!running){;}
         }
         
         //Wyslanie komunikatu o zakonczeniu czytania z pliku
@@ -202,7 +224,7 @@ int main(){
             return 1;
         }
         while(1){
-
+            //while(!running){;}
             read(fd, &buffer, sizeof(buffer));
             if(strcmp(buffer,"Koniec") == 0) break;
             size = strlen(buffer);
@@ -231,7 +253,7 @@ int main(){
         printf("(3) Jestem procesem:  %d\n", getpid());
         while(1)
         {
-
+            while(!running){;}
             sem_wait(semP3_P2);
             printf("Odebralem od P2: %d\n", *buffer2);
             suma += *buffer2;
