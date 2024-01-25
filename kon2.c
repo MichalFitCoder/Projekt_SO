@@ -27,7 +27,8 @@ sem_t *semP2_P3;
 sem_t *semP3_P2;
 int* buffer2;
 int *msgid;
-int running = 1;
+int *running;
+int klawiatura;
 
 
 struct message {
@@ -48,7 +49,7 @@ void handle_sigstpP3(int sig)
 }
 
 
-// Tworzenie kolejki komunikatow
+// Tworzenie kolejki komunikatow (PM)
 void handle_sigPM(int sig)
 {   
     struct message odczytP1;
@@ -56,120 +57,130 @@ void handle_sigPM(int sig)
     if(sig == SIGUSR1){
         kill(getpid() + 1, STOP);
         odczytP1.val = 0;
+        printf("Przerwano wczytywanie...\n");
     }
     if(sig == SIGUSR2){
         kill(getpid() + 1, GO);  
         odczytP1.val = 1;
-
     }
 
+    *msgid = msgget((key_t)555, 0666 | IPC_CREAT); 
     if(*msgid == -1) perror("Blad przy tworzeniu kolejki");
 
-
     if((msgsnd(*msgid, (void *)&odczytP1, sizeof(struct message), 0)) == -1) perror("msg not sent");
-    //kill(getpid() + 1, SIGUSR1);
+    kill(getpid() + 1, SIGUSR1);
 
 }
 
 
-void Nothing(int sig){
+void Nothing(int sig){}
 
-}
 
 void handle_sigP1(int sig)
 {   
-    //msgid = msgget((key_t)555, 0666 | IPC_CREAT);
     long int msg_to_rec = 0;
     struct message odczytZPM;
+    *msgid = msgget((key_t)555, 0666 | IPC_CREAT); 
     msgrcv(*msgid, (void*)&odczytZPM, sizeof(struct message), msg_to_rec, 0);
 
-    
-    if(odczytZPM.val == 0)
-        kill(getpid() - 1, STOP);
+    if(odczytZPM.val == 0);
+        //kill(getpid() + 1, STOP);
 
-    if(odczytZPM.val == 1)
-        kill(getpid() - 1, GO);
+    if(odczytZPM.val == 1);
+        //kill(getpid() + 1, GO);
     
-    if((msgsnd(*msgid, (void *)&odczytZPM, sizeof(struct message), 0)) == -1) perror("msg not sent");
+    //if((msgsnd(*msgid, (void *)&odczytZPM, sizeof(struct message), 0)) == -1) perror("msg not sent");
 
-    //kill(getpid() + 1, SIGUSR1);
+    kill(getpid() + 1, SIGUSR1);
 }
 
 
 void handle_sigP2(int sig)
 {   
-    //int msgid = msgget((key_t)555, 0666 | IPC_CREAT);
     long int msg_to_rec2 = 0;
     struct message odczytZP1;
-    msgrcv(*msgid, (void*)&odczytZP1, sizeof(struct message), msg_to_rec2, 0);
+    //*msgid = msgget((key_t)5556, 0666 | IPC_CREAT);
+    //msgrcv(*msgid, (void*)&odczytZP1, sizeof(struct message), msg_to_rec2, 0);
 
-    if(odczytZP1.val == 0)
-        kill(getpid() + 1, STOP);
+    if(odczytZP1.val == 0);
+        //kill(getpid() + 1, STOP);
 
-    if(odczytZP1.val == 1)
-        kill(getpid() + 1, GO);
+    if(odczytZP1.val == 1);
+        //kill(getpid() + 1, GO);
 
-    if((msgsnd(*msgid, (void *)&odczytZP1, sizeof(struct message) - sizeof(long), 0)) == -1) perror("msg not sent");
+    //if((msgsnd(*msgid, (void *)&odczytZP1, sizeof(struct message), 0)) == -1) perror("msg not sent");
     kill(getpid() + 1, SIGUSR1);
 }
 
 
-void handle_sigP3(int sig){
+void handle_sigP3(int sig)
+{   
+    printf("(3) Otrzymalem sygnal od P2 o wznowieniu dzialania\n");
+    //*msgid = msgget((key_t)555, 0666 | IPC_CREAT); 
     long int msg_to_rec3 = 0;
     struct message odczytP3;
-    msgrcv(*msgid, (void*)&odczytP3, sizeof(struct message) - sizeof(long), msg_to_rec3, 0);
+    //msgrcv(*msgid, (void*)&odczytP3, sizeof(struct message), msg_to_rec3, 0);
 
-    if(odczytP3.val == 0)
-        kill(getpid() + 1, STOP);
+    if(odczytP3.val == 0);
+        //kill(getpid() + 1, STOP);
 
-    if(odczytP3.val == 1)
-        kill(getpid() + 1, GO);
-
-
+    if(odczytP3.val == 1);
+        //kill(getpid() + 1, GO);
 }
 
 
 
-   int main() {
+int main()
+{
     char buffer[200];
 
     int wybor;  // opcja wyboru klawaitura vs odczyt z pliku
-    printf("1 - klawiatura | 2 - odczyt z pliku: ");
+    printf("#################  MENU  #################\n");
+    printf("#  1 - klawiatura | 2 - odczyt z pliku  #\n");
+    printf("==========================================\n");
     scanf("%d", &wybor);
 
-    FILE *plik;
+    FILE *wejscie;
 
-    if (wybor == 2) {
-    
-        plik = fopen("wiedzmin.txt" , "r");
+    if(wybor == 2) 
+    {
+        wejscie = fopen("wiedzmin.txt" , "r");
 
-        if (plik == NULL) {
-            perror(" bład odczytu pliku");
+        if (wejscie == NULL) {
+            perror("bład odczytu pliku\n");
             return 1;
         }
-    } else 
-    {
 
-        plik = stdin;
+    }else if(wybor == 1)
+    {
+        klawiatura = 1;
+    }else
+    {
+        printf("Podano nie prawidlowa wartosc\n");
     }
 
     mkfifo(fName, 0666);
 
   
     //Tworzenie pamieci wspoldzielonej
-    int shm_id = shmget(IPC_PRIVATE, sizeof(sem_t) * 2 + sizeof(int), IPC_CREAT | 0666);
+    int shm_id = shmget(IPC_PRIVATE, sizeof(sem_t) * 2 + 3 * sizeof(int), IPC_CREAT | 0666);
+
+    if(shm_id == -1) printf("Blad przy tworzeniu pamieci wspoldzielonej\n");
     
     //Dodanie semaforow i bufferu do pamieci wspoldzielonej
     semP2_P3 = (sem_t *)shmat(shm_id,NULL,0);
     semP3_P2 = semP2_P3 + 1;
     buffer2 = (int*)(semP3_P2 + 1);
     msgid = (int*)(buffer2 + 1);
+    running = (int*)(buffer2 + 1);
 
     *msgid = msgget((key_t)555, 0666 | IPC_CREAT); 
-
+    if(*msgid == -1) perror("Blad przy tworzeniu kolejki");
+    *running = 1;
 
     //Inicjalizacja semafora
-    sem_init(semP2_P3, 1, 1);
+    //Wartosci rowna 1 poniewaz pierwszy ma wejsc P2
+    sem_init(semP2_P3, 1, 1); 
     sem_init(semP3_P2, 1, 0);
 
     int check = 0;
@@ -194,20 +205,33 @@ void handle_sigP3(int sig){
     //Kod dla 1 procesu
     if(id == 1)
     {
-
         printf("(1) Jestem procesem:  %d\n", getpid());
         signal(SIGTSTP, &Nothing);
         signal(SIGUSR1, &handle_sigP1);
         signal(SIGQUIT, &Nothing);
+
         fd = open(fName, O_WRONLY);
         if(fd == -1){
             printf("cos poszlo nie tak!");
             return 1;
-        } 
+        }
 
-        while(fgets(buffer, sizeof(buffer), plik))
+        //Obsluga wejscia z klawiatury
+        if(klawiatura == 1)
+        {
+            while(1)
+            {
+                while(!running){;}
+                scanf("%s",buffer);
+                write(fd, &buffer, sizeof(buffer));
+            }
+        }
+
+        //Obsluga wejscia z pliku
+        while(fgets(buffer, sizeof(buffer), wejscie))
         {
             write(fd, &buffer, sizeof(buffer));
+            while(!running){;}
            
         }
         
@@ -233,28 +257,23 @@ void handle_sigP3(int sig){
             printf("cos poszlo nie tak!");
             return 1;
         }
-        while(1){
-            //while(!running){;}
+        while(1)
+        {
+            while(!running){;}
             read(fd, &buffer, sizeof(buffer));
             if(strcmp(buffer,"Koniec") == 0) break;
             size = strlen(buffer);
             sem_wait(semP2_P3);
             *buffer2 = size;
-            sem_post(semP3_P2);
-           
+            sem_post(semP3_P2);  
         }
         close(fd);
     }
 
     //Kod dla 3 procesu
-    if(id == 3){
+    if(id == 3)
+    {
         int suma = 0;
-
-        //Sygnaly
-        /*struct sigaction sa;
-        sa.sa_handler = &handle_sigstp;
-        sa.sa_flags = SA_RESTART;
-        sigaction(SIGTSTP, &sa, NULL);*/
 
         signal(SIGTSTP, &handle_sigstpP3);
         signal(SIGQUIT, &handle_sigstpP3);
@@ -265,7 +284,7 @@ void handle_sigP3(int sig){
         {
             while(!running){;}
             sem_wait(semP3_P2);
-            printf("Odebralem od P2: %d\n", *buffer2 - 1);
+            printf("Odebralem od P2: %d\n", *buffer2);
             suma += *buffer2;
             printf("Odczytanych znakow lacznie: %d\n", suma);
             sem_post(semP2_P3);
@@ -284,17 +303,28 @@ void handle_sigP3(int sig){
         signal(SIGUSR2, &handle_sigPM);
         while(1)
         {
-
+            //Nieskonczona petla aby proces macierzysty sie nie skonczyl
         }
 
     }
 
     
-    //wait(NULL);
+    wait(NULL);
 
+    // Zwalnianie uzytych zasobow
+
+    // Usunięcie semaforów
+    sem_close(semP2_P3);
+    sem_close(semP3_P2);
+
+    // Usunięcie pamięci współdzielonej
+    shmctl(shm_id, IPC_RMID, NULL);
+
+    // Usunięcie kolejki komunikatów
+    msgctl(*msgid, IPC_RMID, NULL);
+
+    // Usunięcie pliku FIFO
+    unlink(fName);
 
     return 0;
-    
-    
-    
 }
